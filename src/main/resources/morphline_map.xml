@@ -1,0 +1,5 @@
+<?xml version="1.0"?>
+<indexer table="call" mapper="com.ngdata.hbaseindexer.morphline.MorphlineResultToSolrMapper">
+   <param name="morphlineFile" value="morphlines.conf"/>
+   <param name="morphlineId" value="morphline_call"/>
+</indexer>

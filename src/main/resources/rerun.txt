@@ -1,0 +1,44 @@
+ps -ef|grep callcenter| grep -v grep |awk '{print $2}'|xargs kill
+
+sleep 5
+
+export ZOOKEEPER=npopa-2.vpc.cloudera.com:2181/kafka
+export KAFKA_B1=npopa-2.vpc.cloudera.com:9093
+export KAFKA_B2=npopa-3.vpc.cloudera.com:9093
+export KAFKA_B3=npopa-4.vpc.cloudera.com:9093
+
+TOPICS="call agent"
+for TOPIC in $TOPICS; do
+kafka-topics --zookeeper $ZOOKEEPER --delete   --topic $TOPIC 
+sleep 5
+kafka-topics --zookeeper $ZOOKEEPER --create   --topic $TOPIC --partitions 3 --replication-factor 3
+kafka-topics --zookeeper $ZOOKEEPER --describe --topic $TOPIC 
+done 
+kafka-topics --zookeeper $ZOOKEEPER --list
+
+
+cat <<EOF |hbase shell
+disable 'agent'
+drop 'agent'
+create 'agent', {NAME => 'J', DATA_BLOCK_ENCODING => 'FAST_DIFF', COMPRESSION => 'SNAPPY', VERSIONS => '1', TTL => '33696000' },
+                {NAME => 'S', DATA_BLOCK_ENCODING => 'FAST_DIFF', COMPRESSION => 'SNAPPY', VERSIONS => '1', TTL => '33696000' },
+                {NAME => 'M', DATA_BLOCK_ENCODING => 'FAST_DIFF', COMPRESSION => 'SNAPPY', VERSIONS => '1', TTL => '33696000' },
+                {NUMREGIONS => 32, SPLITALGO => 'HexStringSplit'}
+grant 'flume', 'RWXCA', 'agent'
+EOF
+
+cat <<EOF |hbase shell
+disable 'call'
+drop 'call'
+create 'call', {NAME => 'J', DATA_BLOCK_ENCODING => 'FAST_DIFF', COMPRESSION => 'SNAPPY', VERSIONS => '1', TTL => '33696000' },
+               {NAME => 'S', DATA_BLOCK_ENCODING => 'FAST_DIFF', COMPRESSION => 'SNAPPY', VERSIONS => '1', TTL => '33696000' },
+               {NAME => 'M', DATA_BLOCK_ENCODING => 'FAST_DIFF', COMPRESSION => 'SNAPPY', VERSIONS => '1', TTL => '33696000' },
+            {NUMREGIONS => 32, SPLITALGO => 'HexStringSplit'}
+grant 'flume', 'RWXCA', 'call'
+EOF
+
+
+ps -ef|grep callcenter| grep -v grep |awk '{print $2}'|xargs kill
+
+rm -rf nohup.out
+nohup ./run_me.sh &

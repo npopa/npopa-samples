@@ -1,0 +1,6 @@
+<configuration>
+  <property>
+    <name>my.new.property</name>
+    <value>myValue</value>
+  </property> 
+</configuration>

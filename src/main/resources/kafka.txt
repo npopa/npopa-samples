@@ -1,0 +1,100 @@
+export ZOOKEEPER=npopa-2.vpc.cloudera.com:2181/kafka
+export KAFKA_B1=npopa-2.vpc.cloudera.com:9093
+export KAFKA_B2=npopa-3.vpc.cloudera.com:9093
+export KAFKA_B3=npopa-4.vpc.cloudera.com:9093
+
+TOPICS="call agent"
+for TOPIC in $TOPICS; do
+kafka-topics --zookeeper $ZOOKEEPER --delete   --topic $TOPIC 
+sleep 5
+kafka-topics --zookeeper $ZOOKEEPER --create   --topic $TOPIC --partitions 3 --replication-factor 3
+kafka-topics --zookeeper $ZOOKEEPER --describe --topic $TOPIC 
+done 
+kafka-topics --zookeeper $ZOOKEEPER --list
+
+
+kinit ha549487 #make sure you are an kafka admin
+kafka-sentry -cr -r hb478297r
+kafka-sentry -arg -g hb478297g -r hb478297r
+kafka-sentry -arg -g flume -r hb478297r
+kafka-sentry -arg -g hbase -r hb478297r
+kafka-sentry -gpr -r hb478297r -p "Topic=call->action=ALL"
+kafka-sentry -gpr -r hb478297r -p "Topic=agent->action=ALL"
+kafka-sentry -gpr -r hb478297r -p "Topic=__consumer_offsets->action=ALL"
+kafka-sentry -gpr -r hb478297r -p "Consumergroup=flume_call_group->action=ALL"
+kafka-sentry -gpr -r hb478297r -p "Consumergroup=flume_agent_group->action=ALL"
+kafka-sentry -gpr -r hb478297r -p "Consumergroup=flume_call_audit_group->action=ALL"
+kafka-sentry -gpr -r hb478297r -p "Consumergroup=kafka_call_backup_group->action=ALL"
+kafka-sentry -gpr -r hb478297r -p "Consumergroup=kafka_agent_backup_group->action=ALL"
+kafka-sentry -gpr -r hb478297r -p "Consumergroup=agent_g01->action=ALL"
+kafka-sentry -gpr -r hb478297r -p "Consumergroup=call_g01->action=ALL"
+
+export KAFKA_OPTS="-Djava.security.auth.login.config=/root/kafka-jaas.conf"
+#you can add --from-beginning 
+kafka-console-consumer  --new-consumer --from-beginning --topic call --consumer.config call_backup.properties --bootstrap-server npopa-2.vpc.cloudera.com:9093 --delete-consumer-offsets>/data/kafka_call.msg
+kafka-console-consumer  --new-consumer --from-beginning --topic agent --consumer.config agent_backup.properties --bootstrap-server npopa-2.vpc.cloudera.com:9093 --delete-consumer-offsets>/data/kafka_agent.msg
+
+export KAFKA_OPTS="-Djava.security.auth.login.config=/root/kafka-jaas.conf -Xmx500m"
+
+kafka-run-class kafka.admin.ConsumerGroupCommand --bootstrap-server npopa-2.vpc.cloudera.com:9093 --describe --new-consumer --group flume_call_audit_group --command-config admin.properties
+kafka-run-class kafka.admin.ConsumerGroupCommand --bootstrap-server npopa-2.vpc.cloudera.com:9093 --describe --new-consumer --group flume_call_group --command-config admin.properties
+kafka-run-class kafka.admin.ConsumerGroupCommand --bootstrap-server npopa-2.vpc.cloudera.com:9093 --describe --new-consumer --group flume_agent_group --command-config admin.properties
+
+kafka-console-consumer  --new-consumer --consumer.config consumer.properties \
+--from-beginning --topic __consumer_offsets --bootstrap-server npopa-2.vpc.cloudera.com:9093 \
+--formatter "kafka.coordinator.GroupMetadataManager\$OffsetsMessageFormatter"
+
+
+
+head  kafka_agent.msg|nc npopa-1.vpc.cloudera.com 6680
+
+
+
+[root@npopa-1 ~]# cat /opt/cloudera/security/flafka_jaas.conf
+    Client {
+    com.sun.security.auth.module.Krb5LoginModule required
+    useKeyTab=true
+    storeKey=true
+    keyTab="flume.keytab"
+    principal="flume/npopa-1.vpc.cloudera.com@AD.SEC.CLOUDERA.COM";
+    };
+
+    KafkaClient {
+    com.sun.security.auth.module.Krb5LoginModule required
+    useKeyTab=true
+    storeKey=true
+    keyTab="flume.keytab"
+    principal="flume/npopa-1.vpc.cloudera.com@AD.SEC.CLOUDERA.COM";
+    };
+==================
+export TOPIC=call
+kafka-consumer-offset-checker --zookeeper $ZOOKEEPER --topic $TOPIC --group flume 
+kafka-console-consumer  --zookeeper $ZOOKEEPER --from-beginning --topic $TOPIC      
+
+  
+kafka-console-consumer  --zookeeper $ZOOKEEPER --from-beginning --topic kafka-c1      
+
+
+echo "group.id=hungry_hippo" > consumer.properties
+kafka-console-consumer  --zookeeper $ZOOKEEPER --from-beginning --topic $TOPIC --consumer.config consumer.properties --delete-consumer-offsets  
+kafka-consumer-offset-checker --zookeeper $ZOOKEEPER --topic $TOPIC --group hungry_hippo 
+
+
+
+#verify kafka SSL is turned on 
+
+openssl s_client -debug -connect npopa-cm.vpc.cloudera.com:9093 -tls1
+
+
+Kafka 2.x
+
+For old consumers (Apache Kafka 0.8.x implementation):
+
+$ kafka-run-class kafka.admin.ConsumerGroupCommand --zookeeper <zookeeper_host>:2181 --list
+$ kafka-run-class kafka.admin.ConsumerGroupCommand --zookeeper <zookeeper_host>:2181 --describe --group console-consumer-4444
+
+For new consumers (Apache Kafka 0.9.x implementation):
+
+$ kafka-run-class kafka.admin.ConsumerGroupCommand --bootstrap-server npopa-2.vpc.cloudera.com:9093 --list --new-consumer --command-config admin.properties
+$ kafka-run-class kafka.admin.ConsumerGroupCommand --bootstrap-server npopa-2.vpc.cloudera.com:9093 --describe --new-consumer --group flume_call_group --command-config admin.properties
+

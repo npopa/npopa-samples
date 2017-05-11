@@ -1,0 +1,80 @@
+timestamp=1487964476285, value={"id":"00fff005-e012-4a7a-b4b0-0d00c8eb4a46", 
+                               "start":"1487961422908", 
+                               "end":"1487961792276", 
+                               "ringTime":"2030", 
+                               "talkTime":"314952", 
+                               "holdTime":"0", 
+                               "docTime":"52386", 
+                               "totalTime":"369368", 
+                               "totalCalculatedTime":"369368", 
+                               "agent":"agent29981", 
+                               "callCenter":"Palo Alto", 
+                               "topic":"Flume", 
+                               "subtopic":"coding", 
+                               "metricType":"CALL"}
+                               
+                               
+                               
+export ZOOKEEPER=npopa-2.vpc.cloudera.com:2181
+export COLLECTION=callmetrics
+
+#solrctl instancedir --generate $HOME/$COLLECTION
+#vi $COLLECTION/conf/schema.xml
+
+#Load data in SOLR
+solrctl --zk $ZOOKEEPER/solr --debug instancedir --delete $COLLECTION 
+solrctl --zk $ZOOKEEPER/solr --debug instancedir  --create $COLLECTION $HOME/$COLLECTION
+
+solrctl --zk $ZOOKEEPER/solr --debug collection --delete $COLLECTION
+solrctl --zk $ZOOKEEPER/solr --debug collection  --create $COLLECTION -s 4 -m 1
+
+
+cat <<-EOF>jaas.conf
+Client {
+  com.sun.security.auth.module.Krb5LoginModule required
+  doNotPrompt=true
+  useKeyTab=true
+  keyTab="/root/hb580539.keytab"  
+  principal=hb580539@AD.SEC.CLOUDERA.COM
+  useTicketCache=false
+  storeKey=true
+  debug=true;
+};
+
+EOF
+
+#-D 'mapred.child.java.opts=-Xmx2G -Xms2G -XX:PermSize=256M -XX:MaxPermSize=1G' \
+
+export HADOOP_CLIENT_OPTS='-Xmx2G -Xms2G -XX:PermSize=256M -XX:MaxPermSize=1G'
+export HADOOP_OPTS="-Djava.security.auth.login.config=/root/jaas.conf -Djavax.net.ssl.trustStore=/opt/cloudera/security/jks/truststore.jks -Djavax.net.ssl.trustStorePassword=cloudera" 
+hadoop --config /etc/hadoop/conf \
+jar /opt/cloudera/parcels/CDH/jars/hbase-indexer-mr-*-job.jar \
+--conf /etc/hbase/conf/hbase-site.xml \
+--hbase-indexer-file $HOME/morphlines_map.xml \
+--zk-host $ZOOKEEPER/solr \
+--collection $COLLECTION \
+--go-live 
+
+####debugging 
+#cat <<-EOF>log4j.properties
+#log4j.logger.org.kitesdk.morphline=TRACE
+#log4j.logger.com.ngdata=TRACE
+#EOF
+#Add below to the indexer
+--log4j /root/log4j.properties
+
+
+hbase-indexer add-indexer \
+--name ${COLLECTION}_idx \
+--indexer-conf /root/morphlines_map.xml \
+--connection-param solr.zk=$ZOOKEEPER/solr \
+--connection-param solr.collection=$COLLECTION \
+--zookeeper $ZOOKEEPER
+
+hbase-indexer list-indexers \
+--zookeeper $ZOOKEEPER
+ 
+ 
+ 
+ 
+                               

@@ -1,0 +1,259 @@
+kinit hb580539
+
+
+cat <<EOF |hbase shell
+disable 'agent'
+drop 'agent'
+create 'agent', {NAME => 'J', DATA_BLOCK_ENCODING => 'FAST_DIFF', COMPRESSION => 'SNAPPY', VERSIONS => '1', TTL => '33696000' },
+                {NAME => 'S', DATA_BLOCK_ENCODING => 'FAST_DIFF', COMPRESSION => 'SNAPPY', VERSIONS => '1', TTL => '33696000' },
+                {NAME => 'M', DATA_BLOCK_ENCODING => 'FAST_DIFF', COMPRESSION => 'SNAPPY', VERSIONS => '1', TTL => '33696000', REPLICATION_SCOPE => 1 },
+                {NUMREGIONS => 32, SPLITALGO => 'HexStringSplit'}
+grant 'flume', 'RWXCA', 'agent'
+EOF
+
+cat <<EOF |hbase shell
+disable 'call'
+drop 'call'
+create 'call', {NAME => 'J', DATA_BLOCK_ENCODING => 'FAST_DIFF', COMPRESSION => 'SNAPPY', VERSIONS => '1', TTL => '33696000' },
+               {NAME => 'S', DATA_BLOCK_ENCODING => 'FAST_DIFF', COMPRESSION => 'SNAPPY', VERSIONS => '1', TTL => '33696000' },
+               {NAME => 'M', DATA_BLOCK_ENCODING => 'FAST_DIFF', COMPRESSION => 'SNAPPY', VERSIONS => '1', TTL => '33696000', REPLICATION_SCOPE => 1 },
+            {NUMREGIONS => 32, SPLITALGO => 'HexStringSplit'}
+grant 'flume', 'RWXCA', 'call'
+EOF
+
+hbase org.apache.hadoop.hbase.mapreduce.RowCounter call
+hbase org.apache.hadoop.hbase.mapreduce.RowCounter agent
+
+#initial
+for node in npopa-{1..8}.vpc.cloudera.com; do 
+sed "s/_HOST/$node/g" /Users/npopa/Documents/gist/flafka_jaas.conf>/tmp/flafka_jaas.conf
+ssh root@$node "mkdir -p /var/lib/flume-ng/plugins.d/agent1/lib/;cp /opt/cloudera/parcels/CDH/jars/json-simple-1.1.1.jar /var/lib/flume-ng/plugins.d/agent1/lib/;chmod -R 777 /var/lib/flume-ng/plugins.d;chown -R flume:flume /var/lib/flume-ng/plugins.d/"
+scp /tmp/flafka_jaas.conf root@$node:/opt/cloudera/security/flafka_jaas.conf
+scp /Users/npopa/Documents/workspace/npopa-samples/target/npopa-samples-0.0.1-SNAPSHOT.jar root@$node:/var/lib/flume-ng/plugins.d/agent1/lib/
+done
+
+
+#jar change
+for node in npopa-{1..8}.vpc.cloudera.com; do 
+scp /Users/npopa/Documents/workspace/npopa-samples/target/npopa-samples-0.0.1-SNAPSHOT.jar root@$node:/var/lib/flume-ng/plugins.d/agent1/lib/
+done
+
+
+cat /data/kafka_agent.msg|nc npopa-1.vpc.cloudera.com 6680
+cat /data/kafka_call.msg|nc npopa-1.vpc.cloudera.com 6681
+
+
+
+
+
+
+
+
+
+
+#Get all information about a call
+hbase(main):039:0> get 'call','eed61aef-906a-4e5f-8c9c-ef770bbb3335'
+COLUMN                                                                CELL
+ J:1487372243627                                                      timestamp=1487810044785, value={"type":"RINGING", "id":"eed61aef-906a-4e5f-8c9c-ef770bbb3335", "timestamp":"1487372243627"}
+ J:1487372302411                                                      timestamp=1487810043014, value={"type":"INPROGRESS", "id":"eed61aef-906a-4e5f-8c9c-ef770bbb3335", "agent":"agent03386", "callCenter":"New York", "timestamp":"1487372302411"}
+ J:1487372434199                                                      timestamp=1487810043638, value={"type":"ONHOLD", "id":"eed61aef-906a-4e5f-8c9c-ef770bbb3335", "agent":"agent03386", "timestamp":"1487372434199"}
+ J:1487372504536                                                      timestamp=1487810047160, value={"type":"INPROGRESS", "id":"eed61aef-906a-4e5f-8c9c-ef770bbb3335", "agent":"agent03386", "callCenter":"New York", "timestamp":"1487372504536"}
+ J:1487372608058                                                      timestamp=1487810045920, value={"type":"FINISHED", "id":"eed61aef-906a-4e5f-8c9c-ef770bbb3335", "agent":"agent03386", "timestamp":"1487372608058"}
+ J:1487372689087                                                      timestamp=1487810050152, value={"type":"COMPLETED", "id":"eed61aef-906a-4e5f-8c9c-ef770bbb3335", "agent":"agent03386", "topic":"Zookeeper", "subtopic":"architecture", "timestamp":"1487372689087"}
+ M:M                                                                  timestamp=1487815658529, value={"id":"eed61aef-906a-4e5f-8c9c-ef770bbb3335", "start":"1487372243627", "end":"1487372689087", "ringTime":"58784", "talkTime":"235310", "holdTime":"70337", "docTime":"81029
+                                                                      ", "totalTime":"445460", "totalCalculatedTime":"445460", "agent":"agent03386", "callCenter":"New York", "topic":"Zookeeper", "subtopic":"architecture", "metricType":"CALL"}
+7 row(s) in 0.0250 seconds
+
+#Get latest status for time period 2017021714
+hbase(main):043:0> get 'call','ee|2017021714','S:eed61aef-906a-4e5f-8c9c-ef770bbb3335'
+COLUMN                                                                CELL
+ S:eed61aef-906a-4e5f-8c9c-ef770bbb3335                               timestamp=1487866526034, value=INPROGRESS
+1 row(s) in 0.0040 seconds
+
+#Call was actually completed in the next time period
+hbase(main):047:0> get 'call','ee|2017021715','S:eed61aef-906a-4e5f-8c9c-ef770bbb3335'
+COLUMN                                                                CELL
+ S:eed61aef-906a-4e5f-8c9c-ef770bbb3335                               timestamp=1487866534300, value=COMPLETED
+1 row(s) in 0.0100 seconds
+
+#Get all the completed calls for a date
+hbase(main):066:0> scan 'call',{FILTER => "(PrefixFilter('00|20170217')) AND (ValueFilter(=,'binary:COMPLETED')"}
+ROW                                                                   COLUMN+CELL
+ 00|2017021714                                                        column=S:00000c35-742d-4645-9700-ea3567872279, timestamp=1487866482483, value=COMPLETED
+ 00|2017021714                                                        column=S:0000808a-89b9-46b2-bc3f-e175f30ee39f, timestamp=1487866497009, value=COMPLETED
+ 00|2017021714                                                        column=S:0000bf81-ef44-4980-afdc-43d60b24c3bf, timestamp=1487866514672, value=COMPLETED
+ 00|2017021714                                                        column=S:0000cf12-2171-43fd-99a8-668c143c4abc, timestamp=1487866518635, value=COMPLETED
+ 00|2017021714                                                        column=S:0000d461-0e24-404f-9d6a-67162255570e, timestamp=1487866517683, value=COMPLETED
+ 00|2017021714                                                        column=S:0000f78b-4afb-4dae-81c7-3a850976e528, timestamp=1487866497467, value=COMPLETED
+ 00|2017021714                                                        column=S:000128c0-d0b7-4e1e-884f-93fef61b6a11, timestamp=1487866461150, value=COMPLETED
+ 00|2017021714                                                        column=S:00023ec9-9378-4938-8d06-da96b5180bb8, timestamp=1487866498857, value=COMPLETED
+ 00|2017021714                                                        column=S:0002463d-6d51-4297-a5e7-e366e3c123c0, timestamp=1487866519564, value=COMPLETED
+ 00|2017021714                                                        column=S:00025f9b-1bba-4c60-ac29-b72fa0b9b18c, timestamp=1487866481321, value=COMPLETED
+ 00|2017021714                                                        column=S:0002ca07-da48-43e6-bc8e-e690bbee41f8, timestamp=1487866498857, value=COMPLETED
+ 00|2017021714                                                        column=S:000332c0-44af-4dad-8ac5-19983afba000, timestamp=1487866476019, value=COMPLETED
+ 00|2017021714                                                        column=S:00034527-1f26-40d0-a23b-ed01eb36cada, timestamp=1487866476995, value=COMPLETED
+
+#We can see that agent03386 handled the call. What other calls did the agent handled during the same time period?
+[root@npopa-1 ~]# echo -n 'agent03386' |md5sum
+d6bd19647dff67022b30ab6044ddc26f  -
+[root@npopa-1 ~]#
+
+hbase(main):048:0> get 'call','d6|agent03386|2017021714'
+COLUMN                                                                CELL
+ S:2df9258c-461e-4e55-b13e-f0ab918a880b                               timestamp=1487866514751, value=COMPLETED
+ S:369341cc-9917-4e75-bf84-88e5b9508579                               timestamp=1487866481391, value=COMPLETED
+ S:3a7f5cd6-ab9e-4633-b87e-355cde2c497d                               timestamp=1487866465897, value=FINISHED
+ S:5c4850ad-d66b-4851-862c-5f3a92672a41                               timestamp=1487866474911, value=COMPLETED
+ S:728a95b4-96de-4046-a8c4-e347c666f51b                               timestamp=1487866527877, value=COMPLETED
+ S:9474d0b5-e6f4-4a4f-835e-ec556ae5b75b                               timestamp=1487866519448, value=COMPLETED
+ S:c71c232e-d83c-4d79-855b-9b1ef4560229                               timestamp=1487866500967, value=COMPLETED
+ S:cfc1c243-1581-42e1-b430-aa11c4646bd2                               timestamp=1487866494925, value=COMPLETED
+ S:eed61aef-906a-4e5f-8c9c-ef770bbb3335                               timestamp=1487866526030, value=INPROGRESS
+ S:f121a171-23fa-4a88-a9ed-1e38ca2707a4                               timestamp=1487866487853, value=COMPLETED
+10 row(s) in 0.3700 seconds
+
+#What is the history of the agent actions for that period?
+hbase(main):049:0> get 'agent','d6|agent03386|2017021714'
+COLUMN                                                                CELL
+ J:1487369204185                                                      timestamp=1487866454241, value={"agent":"agent03386", "timestamp":"1487369204185", "status":"AVAILABLE"}
+ J:1487369439146                                                      timestamp=1487866455759, value={"agent":"agent03386", "timestamp":"1487369439146", "status":"TALKING"}
+ J:1487369635407                                                      timestamp=1487866458228, value={"agent":"agent03386", "timestamp":"1487369635407", "status":"RESEARCHING"}
+ J:1487369680347                                                      timestamp=1487866458625, value={"agent":"agent03386", "timestamp":"1487369680347", "status":"TALKING"}
+ J:1487369795572                                                      timestamp=1487866461078, value={"agent":"agent03386", "timestamp":"1487369795572", "status":"DOCUMENTING"}
+ J:1487369868877                                                      timestamp=1487866461215, value={"agent":"agent03386", "timestamp":"1487369868877", "status":"AVAILABLE"}
+ J:1487369868916                                                      timestamp=1487866462291, value={"agent":"agent03386", "timestamp":"1487369868916", "status":"TALKING"}
+ J:1487370027779                                                      timestamp=1487866465789, value={"agent":"agent03386", "timestamp":"1487370027779", "status":"DOCUMENTING"}
+ J:1487370059079                                                      timestamp=1487866463393, value={"agent":"agent03386", "timestamp":"1487370059079", "status":"AVAILABLE"}
+ J:1487370059126                                                      timestamp=1487866465789, value={"agent":"agent03386", "timestamp":"1487370059126", "status":"TALKING"}
+ J:1487370241202                                                      timestamp=1487866465870, value={"agent":"agent03386", "timestamp":"1487370241202", "status":"DOCUMENTING"}
+ J:1487370314854                                                      timestamp=1487866466616, value={"agent":"agent03386", "timestamp":"1487370314854", "status":"AVAILABLE"}
+ J:1487370314895                                                      timestamp=1487866466616, value={"agent":"agent03386", "timestamp":"1487370314895", "status":"TALKING"}
+ J:1487370597128                                                      timestamp=1487866471987, value={"agent":"agent03386", "timestamp":"1487370597128", "status":"DOCUMENTING"}
+ J:1487370655144                                                      timestamp=1487866469337, value={"agent":"agent03386", "timestamp":"1487370655144", "status":"AVAILABLE"}
+ J:1487370655185                                                      timestamp=1487866471987, value={"agent":"agent03386", "timestamp":"1487370655185", "status":"TALKING"}
+ J:1487370824159                                                      timestamp=1487866471514, value={"agent":"agent03386", "timestamp":"1487370824159", "status":"DOCUMENTING"}
+ J:1487370902268                                                      timestamp=1487866479093, value={"agent":"agent03386", "timestamp":"1487370902268", "status":"AVAILABLE"}
+ J:1487370902316                                                      timestamp=1487866477241, value={"agent":"agent03386", "timestamp":"1487370902316", "status":"TALKING"}
+ J:1487371186793                                                      timestamp=1487866481260, value={"agent":"agent03386", "timestamp":"1487371186793", "status":"DOCUMENTING"}
+ J:1487371262543                                                      timestamp=1487866483283, value={"agent":"agent03386", "timestamp":"1487371262543", "status":"AVAILABLE"}
+ J:1487371262580                                                      timestamp=1487866477017, value={"agent":"agent03386", "timestamp":"1487371262580", "status":"TALKING"}
+ J:1487371415862                                                      timestamp=1487866479383, value={"agent":"agent03386", "timestamp":"1487371415862", "status":"RESEARCHING"}
+ J:1487371503891                                                      timestamp=1487866486340, value={"agent":"agent03386", "timestamp":"1487371503891", "status":"TALKING"}
+ J:1487371707066                                                      timestamp=1487866489349, value={"agent":"agent03386", "timestamp":"1487371707066", "status":"DOCUMENTING"}
+ J:1487371747028                                                      timestamp=1487866490028, value={"agent":"agent03386", "timestamp":"1487371747028", "status":"AVAILABLE"}
+ J:1487371747065                                                      timestamp=1487866490028, value={"agent":"agent03386", "timestamp":"1487371747065", "status":"TALKING"}
+ J:1487371835414                                                      timestamp=1487866492627, value={"agent":"agent03386", "timestamp":"1487371835414", "status":"RESEARCHING"}
+ J:1487371921867                                                      timestamp=1487866484202, value={"agent":"agent03386", "timestamp":"1487371921867", "status":"TALKING"}
+ J:1487371978314                                                      timestamp=1487866493182, value={"agent":"agent03386", "timestamp":"1487371978314", "status":"DOCUMENTING"}
+ J:1487372015012                                                      timestamp=1487866493182, value={"agent":"agent03386", "timestamp":"1487372015012", "status":"AVAILABLE"}
+ J:1487372015052                                                      timestamp=1487866484736, value={"agent":"agent03386", "timestamp":"1487372015052", "status":"TALKING"}
+ J:1487372225621                                                      timestamp=1487866494995, value={"agent":"agent03386", "timestamp":"1487372225621", "status":"DOCUMENTING"}
+ J:1487372302364                                                      timestamp=1487866496988, value={"agent":"agent03386", "timestamp":"1487372302364", "status":"AVAILABLE"}
+ J:1487372302411                                                      timestamp=1487866496988, value={"agent":"agent03386", "timestamp":"1487372302411", "status":"TALKING"}
+35 row(s) in 0.0610 seconds
+
+#What is the latest status on agent03386 agent for this time period?
+hbase(main):051:0> get 'agent','d6|2017021714',{FILTER => "ColumnPrefixFilter('agent03386')"}
+COLUMN                                                                CELL
+ S:agent03386                                                         timestamp=1487866496988, value=TALKING
+1 row(s) in 0.1010 seconds
+
+#Need all history for agent for this date 201702 ?
+hbase(main):065:0> scan 'agent',{FILTER => "(PrefixFilter('d6|201702')) AND ColumnPrefixFilter('agent03386')"}
+ROW                                                                   COLUMN+CELL
+ d6|2017021714                                                        column=S:agent03386, timestamp=1487866496988, value=TALKING
+ d6|2017021715                                                        column=S:agent03386, timestamp=1487866542439, value=ON_BREAK
+ d6|2017021716                                                        column=S:agent03386, timestamp=1487866549041, value=OFFLINE
+ d6|2017021800                                                        column=S:agent03386, timestamp=1487867015769, value=DOCUMENTING
+ d6|2017021801                                                        column=S:agent03386, timestamp=1487867053922, value=TALKING
+ d6|2017021802                                                        column=S:agent03386, timestamp=1487867085575, value=AVAILABLE
+ d6|2017021803                                                        column=S:agent03386, timestamp=1487867109286, value=AVAILABLE
+ d6|2017021804                                                        column=S:agent03386, timestamp=1487867134653, value=AVAILABLE
+ d6|2017021805                                                        column=S:agent03386, timestamp=1487867151768, value=TALKING
+ d6|2017021806                                                        column=S:agent03386, timestamp=1487867173799, value=AVAILABLE
+ d6|2017021807                                                        column=S:agent03386, timestamp=1487867201206, value=AVAILABLE
+ d6|2017021808                                                        column=S:agent03386, timestamp=1487867150851, value=OFFLINE
+ d6|2017021900                                                        column=S:agent03386, timestamp=1487868067927, value=DOCUMENTING
+ d6|2017021901                                                        column=S:agent03386, timestamp=1487868101430, value=TALKING
+ d6|2017021902                                                        column=S:agent03386, timestamp=1487868132611, value=AVAILABLE
+ d6|2017021903                                                        column=S:agent03386, timestamp=1487868156443, value=DOCUMENTING
+ d6|2017021904                                                        column=S:agent03386, timestamp=1487868180284, value=ON_BREAK
+ d6|2017021905                                                        column=S:agent03386, timestamp=1487868200690, value=DOCUMENTING
+ d6|2017021906                                                        column=S:agent03386, timestamp=1487868219666, value=TALKING
+ d6|2017021907                                                        column=S:agent03386, timestamp=1487868252098, value=AVAILABLE
+ d6|2017021908                                                        column=S:agent03386, timestamp=1487868257613, value=OFFLINE
+ d6|2017022000                                                        column=S:agent03386, timestamp=1487869111374, value=DOCUMENTING
+ d6|2017022001                                                        column=S:agent03386, timestamp=1487869150629, value=AVAILABLE
+ d6|2017022002                                                        column=S:agent03386, timestamp=1487869171464, value=TALKING
+ d6|2017022003                                                        column=S:agent03386, timestamp=1487869198264, value=AVAILABLE
+ d6|2017022004                                                        column=S:agent03386, timestamp=1487869224902, value=AVAILABLE
+ d6|2017022005                                                        column=S:agent03386, timestamp=1487869244917, value=RESEARCHING
+ d6|2017022006                                                        column=S:agent03386, timestamp=1487869272299, value=DOCUMENTING
+ d6|2017022007                                                        column=S:agent03386, timestamp=1487869280879, value=DOCUMENTING
+29 row(s) in 39.5710 seconds
+
+
+
+
+#Weird??
+
+hbase(main):049:0> scan 'call',{FILTER => "(PrefixFilter('00|2017022322')) AND (ColumnPrefixFilter('005ba28d-78e7-4585-a2ef-59ad9b2dc61f')"}
+ROW                                                                   COLUMN+CELL
+ 00|2017022322                                                        column=S:005ba28d-78e7-4585-a2ef-59ad9b2dc61f, timestamp=1487955172626, value=METERED
+1 row(s) in 0.1400 seconds
+
+hbase(main):050:0> scan 'call',{FILTER => "(PrefixFilter('00|2017022322')) AND (ValueFilter(=,'binary:COMPLETED') AND (ColumnPrefixFilter('005ba28d-78e7-4585-a2ef-59ad9b2dc61f')"}
+ROW                                                                   COLUMN+CELL
+ 00|2017022322                                                        column=S:005ba28d-78e7-4585-a2ef-59ad9b2dc61f, timestamp=1487919119470, value=COMPLETED
+1 row(s) in 0.0970 seconds
+
+hbase(main):051:0> scan 'call',{FILTER => "(PrefixFilter('00|2017022322')) AND (ValueFilter(=,'binary:METERED') AND (ColumnPrefixFilter('005ba28d-78e7-4585-a2ef-59ad9b2dc61f')"}
+ROW                                                                   COLUMN+CELL
+ 00|2017022322                                                        column=S:005ba28d-78e7-4585-a2ef-59ad9b2dc61f, timestamp=1487955172626, value=METERED
+1 row(s) in 0.1450 seconds
+
+hbase(main):052:0> major_compact 'call'
+0 row(s) in 0.4100 seconds
+
+hbase(main):053:0> scan 'call',{FILTER => "(PrefixFilter('00|2017022322')) AND (ValueFilter(=,'binary:METERED') AND (ColumnPrefixFilter('005ba28d-78e7-4585-a2ef-59ad9b2dc61f')"}
+ROW                                                                   COLUMN+CELL
+ 00|2017022322                                                        column=S:005ba28d-78e7-4585-a2ef-59ad9b2dc61f, timestamp=1487955172626, value=METERED
+1 row(s) in 0.1730 seconds
+
+hbase(main):054:0> scan 'call',{FILTER => "(PrefixFilter('00|2017022322')) AND (ValueFilter(=,'binary:COMPLETED') AND (ColumnPrefixFilter('005ba28d-78e7-4585-a2ef-59ad9b2dc61f')"}
+ROW                                                                   COLUMN+CELL
+0 row(s) in 0.0990 seconds
+
+hbase(main):055:0>
+
+
+ssh root@npopa-1.vpc.cloudera.com 'mkdir -p /var/lib/flume-ng/plugins.d/agent1/lib'
+ssh root@npopa-1.vpc.cloudera.com 'cp /opt/cloudera/parcels/CDH/jars/json-simple-1.1.1.jar /var/lib/flume-ng/plugins.d/agent1/lib'
+scp /Users/npopa/Documents/workspace/npopa-samples/target/npopa-samples-0.0.1-SNAPSHOT.jar root@npopa-1.vpc.cloudera.com:/var/lib/flume-ng/plugins.d/agent1/lib/
+
+cat<<EOF >/opt/cloudera/security/flafka_jaas.conf
+    Client {
+    com.sun.security.auth.module.Krb5LoginModule required
+    useKeyTab=true
+    storeKey=true
+    keyTab="flume.keytab"
+    principal="flume/npopa-1.vpc.cloudera.com@AD.SEC.CLOUDERA.COM";
+    };
+    
+    KafkaClient {
+    com.sun.security.auth.module.Krb5LoginModule required
+    useKeyTab=true
+    storeKey=true
+    keyTab="flume.keytab"
+    principal="flume/npopa-1.vpc.cloudera.com@AD.SEC.CLOUDERA.COM";
+    };
+EOF
+
+#Java Configuration Options for FlumeAgent
+-Djava.security.auth.login.config=/opt/cloudera/security/flafka_jaas.conf
+
+com.sa.npopa.samples.ccs.v01
+
+
+
+
